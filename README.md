@@ -1,64 +1,77 @@
 # AutoRL
 
-This is a PoC of automatically block traffic on Cloudflare's side based on Nginx Log parsing.
+Đây là một PoC (Proof of Concept) nhằm tự động chặn lưu lượng truy cập trên Cloudflare bằng cách phân tích log của Nginx.
 
-It will evaluate Nginx access.log and find potential CC pattern, and block them on Cloudflare's side and send a message to Telegram Group.
+Công cụ này sẽ đánh giá tệp `access.log` của Nginx để tìm các mẫu tấn công CC (Challenge Collapsar) tiềm ẩn, sau đó chặn chúng trên Cloudflare và gửi thông báo đến nhóm Telegram.
 
-## Topology
+## Mô hình hoạt động
 
-With Cloudflare Argo Tunnel, we can set security group to allow inbound traffic for SSH only, this can guarantee the Host's IP will not be exposed to the Internet (ref: [使用 Cloudflare Argo Tunnel(cloudflared) 来加速和保护你的网站](https://nova.moe/accelerate-and-secure-with-cloudflared/)), however, attackers can still CC your website by sending enormous requests cocurrently, AutoRL is here trying to mitigate this problem.
+Với **Cloudflare Argo Tunnel**, chúng ta có thể thiết lập nhóm bảo mật để chỉ cho phép lưu lượng SSH vào hệ thống, đảm bảo rằng IP của máy chủ không bị lộ trên Internet (tham khảo: [Sử dụng Cloudflare Argo Tunnel (cloudflared) để tăng tốc và bảo vệ website của bạn](https://nova.moe/accelerate-and-secure-with-cloudflared/)). Tuy nhiên, kẻ tấn công vẫn có thể thực hiện CC website bằng cách gửi một lượng lớn request đồng thời. **AutoRL** giúp giảm thiểu vấn đề này.
 
-![](./AutoRL.png)
+![AutoRL](./AutoRL.png)
 
-## Prerequisites
+## Yêu cầu
 
-Since this is only a PoC, the following condition must be met to use AutoRL.
+Vì đây chỉ là một PoC, nên cần đáp ứng các điều kiện sau để sử dụng **AutoRL**:
 
-* Python 3 installed on Host
-* Nginx used for Reverse proxy and all the logs are logged into one `access.log` file.
-* Nginx has the following log format (in `/etc/nginx/nginx.conf`)
+- Máy chủ phải cài đặt **Python 3**.
+- Máy chủ sử dụng **Nginx** làm reverse proxy, và toàn bộ log được ghi vào một tệp `access.log`.
+- **Nginx** phải có định dạng log như sau (trong tệp `/etc/nginx/nginx.conf`):
 
-    ```
+    ```nginx
     log_format  main  '$remote_addr $time_iso8601 "$request" $server_name '
                       '$status $body_bytes_sent "$http_referer" '
                       '"$http_user_agent" "$http_x_forwarded_for"';
     ```
-    On this condition, the raw log should look like this:
+    Khi đó, log thô sẽ có dạng:
+
     ```
-    108.162.245.152 2022-05-05T10:14:19+08:00 "GET /grafana/api/live/ws HTTP/1.1" xxxx.yyyy.tld 400 12 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)" "145.xx.xxx.xxx"
+    108.162.245.152 2022-05-05T10:14:19+08:00 "GET /grafana/api/live/ws HTTP/1.1" xxxx.yyyy.tld 400 12 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, như Gecko)" "145.xx.xxx.xxx"
     ```
-    Where, `108.162.245.152` is Cloudflare's IP,`xxxx.yyyy.tld` is the requested domain , `2022-05-02T10:44:16+08:00` stands for request datetime and `"145.xx.xx.xxx"` is the real visitor IP.
 
+    Trong đó:
 
-## Usage
+    - `108.162.245.152` là IP của Cloudflare.
+    - `xxxx.yyyy.tld` là tên miền được yêu cầu.
+    - `2022-05-02T10:44:16+08:00` là thời gian yêu cầu.
+    - `"145.xx.xx.xxx"` là IP thực của khách truy cập.
 
-1. Download the `autorl.py` to your host
-2. Edit the following variable in the `autorl.py`
+## Cách sử dụng
 
-    * CF_EMAIL (Your Cloudflare login email)
-    * CF_AUTH_KEY (Your Cloudflare Global API Key)
-    * ACCESS_LOG_PATH (Default is `/var/log/nginx/access.log`)
-    * INTERVAL_MIN (Default is 1, then this script will evaluate for 1min's traffic)
-    * RATE_PER_MINUTE (How many requests are allowed for single IP, e,g, when this is set to 600 and `INTERVAL_MIN` is 1, then one IP can send at most 600 requests, after that, this IP will be blocked.)
-    * TG_CHAT_ID (Your Telegram Chat Group ID)
-    * TG_BOT_TOKEN (You should invite a bot to your group, and fillin the bot token here)
-    * IP_WHITE_LIST (If you'd like to whitelist some IP, fillin here)
-3. Create a crontab for this script, example:
-    ```
+1. **Tải tệp** `autorl.py` về máy chủ.
+2. **Chỉnh sửa các biến cấu hình** trong `autorl.py`:
+
+    - `CF_EMAIL`: Email đăng nhập Cloudflare của bạn.
+    - `CF_AUTH_KEY`: Global API Key của Cloudflare.
+    - `ACCESS_LOG_PATH`: Đường dẫn đến tệp log của Nginx (mặc định là `/var/log/nginx/access.log`).
+    - `INTERVAL_MIN`: Khoảng thời gian đánh giá log (mặc định là **1 phút**).
+    - `RATE_PER_MINUTE`: Giới hạn số request tối đa mà một IP có thể gửi trong `INTERVAL_MIN` phút (ví dụ: nếu đặt là **600** và `INTERVAL_MIN` là **1**, thì một IP chỉ được gửi tối đa **600 request** trong một phút, vượt quá sẽ bị chặn).
+    - `TG_CHAT_ID`: ID nhóm Telegram của bạn.
+    - `TG_BOT_TOKEN`: Token của bot Telegram (cần thêm bot vào nhóm Telegram).
+    - `IP_WHITE_LIST`: Danh sách các IP được phép (nếu có).
+
+3. **Thiết lập crontab** để chạy script tự động, ví dụ:
+
+    ```sh
     * * * * * for i in {1..6}; do /usr/bin/python3 /path/to/autorl.py & sleep 10; done
     ```
 
 ## Demo
 
-On Telegram side:
+### Trên Telegram:
 
-![](./demo.png)
+![Demo Telegram](./demo.png)
 
-On Cloudflare side:
+### Trên Cloudflare:
 
-![](./demo-cf.png)
-## Notes
+![Demo Cloudflare](./demo-cf.png)
 
-* Blocked IP address will never gets unblocked.
-* If logrotate is not setup correctly, then parsing the whole `access.log` might consume a lot of system resources.
-* The attack pattern/sample is not stored so we have no idea how the attack is conducted.
+## Lưu ý
+
+- **IP bị chặn sẽ không được tự động mở chặn**.
+- Nếu logrotate không được cấu hình đúng, việc phân tích toàn bộ tệp `access.log` có thể tiêu tốn nhiều tài nguyên hệ thống.
+- **AutoRL không lưu trữ mẫu tấn công**, do đó chúng ta không thể biết chính xác cách cuộc tấn công diễn ra.
+
+---
+
+Nếu có bất kỳ vấn đề gì hoặc cần hỗ trợ, hãy để lại bình luận hoặc liên hệ qua Telegram! 🚀
